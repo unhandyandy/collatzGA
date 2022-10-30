@@ -15,6 +15,7 @@ end
 
 mutable struct Node
     position::Position
+    ## move #
     n::Int8
     hist::Array{Position,1}
     dynVal::Union{Float16,Missing}
@@ -116,11 +117,14 @@ position0 = Position(zeros(Int8,6,7),1)
 function getChildren(p::Position)::Array{Position,1}
     mat = p.board
     newmover = toggleMover(p.mover)
+    ## n = # possible move = # children
     n = count(x->x==0,mat[1,1:7])
     children = Array{Position}(undef,n)
     cnt = 1
+    ## one col at a time
     for j=1:7
         if mat[1,j]==0
+            ## if move possible in this col, add child
             tmp = copy(mat)
             i = findHeight(mat,j)
             tmp[i,j] = p.mover

@@ -292,4 +292,8 @@ function array_transpose(tupes::Array{Array{T,1},1})::Array{Array{T,1},1} where 
     [ [ tupes[i][j] for i=1:r ] for j=1:c ]
 end
 
+function invert_dict(d)
+    Dict(values(d) .=> keys(d))
+end
+
 ;
