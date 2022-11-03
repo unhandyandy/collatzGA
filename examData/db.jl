@@ -1036,3 +1036,19 @@ function combinePerms(p0,ps...)
     end
     res
 end
+
+function getSemGrades(fn)
+    grades = DataFrame(CSV.File(fn))
+    grades.UNIV_ID = lpad.(grades.PRSN_UNIV_ID,10,"0")
+    select!(grades,Not(:PRSN_UNIV_ID))
+    grades
+end
+    
+function findInDF(df,col,val)
+    fa = findall(==(val), df[:,col])
+    if length(fa)==1
+        df[only(fa), :]
+    else
+        missing
+    end
+end
