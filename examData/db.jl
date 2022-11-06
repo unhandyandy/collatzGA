@@ -1,7 +1,7 @@
 
 using CSV,DataFrames,Statistics,Interpolations,LinearAlgebra
 
-## registar format
+## registrar format
 function makeNameDict(csvf)
     len = length(csvf)
     d = Dict{String, Dict{String,String}}()
@@ -9,12 +9,34 @@ function makeNameDict(csvf)
         #println(i)
         entry = csvf[i][3]
         if !ismissing(entry)
-            id = lowercase(entry)[1:end-7]
-            d[id] = Dict("id"=>csvf[i][1],"name"=>csvf[i][2])
+            entry = split(entry,"@")[1]
+            un = lowercase(entry)
+            idstr = lpad(csvf[i][1],10,"0")
+            d[un] = Dict("id"=>idstr,"name"=>csvf[i][2])
         end
     end
     d
 end
+
+function makeIDDict(csvf)
+    len = length(csvf)
+    d = Dict{String, Dict{Union{String,Missing},Union{String,Missing}}}()
+    for i=1:len
+        id = lpad(csvf[i][1],10,"0")
+        if !ismissing(id)
+            un = csvf[i][3]
+            if !ismissing(un)
+                un = split(un,"@")[1]
+                un = lowercase(un)
+            end
+            name = csvf[i][2]
+            d[id] = Dict("username"=>un,"name"=>name)
+        end
+    end
+    d
+end
+
+
 
 checkCode(c,codes) = occursin(c,codes)
 
@@ -174,6 +196,8 @@ end
 
 getAve(d) = skipmissing(d[!,end]) |> mean
 
+getIUIDs() =  CSV.File("iuids.csv",select=[2,14,15])
+
 ## codeDigit is 0-based
 function getData(;dir,term,exam,codeDigit,numberPrompts)
     cd(dir)
@@ -198,7 +222,7 @@ function getData(;dir,term,exam,codeDigit,numberPrompts)
             iuids = -1
         end
     end
-    iuids = iuids==-1 ? -1 : CSV.File("iuids.csv",select=[2,14,15])
+    iuids = iuids==-1 ? -1 : getIUIDs()
 
     nameDict = iuids==-1 ? Dict() : makeNameDict(iuids)
     vmap = (v,n) -> n
@@ -776,6 +800,22 @@ function formCorrs(vec,nvars;renormalize=true)
     cormat, coeffmat, renormalize ? formVec(cormat, coeffmat) : vec
 end
 
+mutable struct MatMask
+    n::Int8
+    mat::Matrix{Bool}
+end
+
+function MatMask(n)
+    empty = zeros(n,n).==1
+    MatMask(n,empty)
+end
+
+function toggle(mm::MatMask,i,j)
+    old = mm.mat[i,j]
+    mm.mat[i,j] = mm.mat[j,i] = !old
+    mm
+end
+
 function formVec(crm,cfm)
     nvars,_ = size(crm)
     nr,nc = size(cfm)
@@ -868,6 +908,7 @@ end
 
 makeProjRows(mat) = mat'*(mat*mat')^-1*mat
 
+## add one variable 
 function formCorrs3(vec,precrm,precfm)
     nv,_ = size(precrm)
     _,nq = size(precfm)
@@ -1037,18 +1078,68 @@ function combinePerms(p0,ps...)
     res
 end
 
-function getSemGrades(fn)
+function getSemGrades(fn,course,term)
     grades = DataFrame(CSV.File(fn))
     grades.UNIV_ID = lpad.(grades.PRSN_UNIV_ID,10,"0")
     select!(grades,Not(:PRSN_UNIV_ID))
-    grades
+    grades = grades[grades.COURSE.==course .&& grades.TERM.==term,:]
+    unique(grades)
 end
     
 function findInDF(df,col,val)
-    fa = findall(==(val), df[:,col])
-    if length(fa)==1
-        df[only(fa), :]
-    else
+    ## println(val)
+    if ismissing(val)
         missing
+    else
+        fa = findall(==(val), df[:,col])
+        ## println(fa)
+        if length(fa)==1
+            df[only(fa), :]
+        else
+            missing
+        end
     end
 end
+
+function makeGradeFinder(grades,nd)
+    function (un)
+        id = nd[un]["id"]
+        row = findInDF(grades,:UNIV_ID,id)
+        ismissing(row) ? missing : row[:GRADE]
+    end
+end
+
+function makeMTFinder(mtdf,idd)
+    function (id,col)
+        un = idd[id]["username"]
+        row = findInDF(mtdf,:username,un)
+        ismissing(row) ? missing : row[col]
+    end
+end
+
+
+function extractDFWframe(sem_grade_df,mt_df)
+    addGrades(mt_df)
+    iuids = getIUIDs()
+    idd = makeIDDict(iuids)
+    mtf = makeMTFinder(mt_df,idd)
+    sem_grade_df.USERNAME = (x->idd[x]["username"]).(grades.UNIV_ID)
+    sem_grade_df.MT_RAW = (x->mtf(x,:score)).(grades.UNIV_ID)
+    sem_grade_df.MT_CURVE = (x->mtf(x,:curve)).(grades.UNIV_ID)
+    sem_grade_df.MT_GRADE = (x->mtf(x,:grade)).(grades.UNIV_ID)
+    dfw_df = select(grades,
+                    :TERM,
+                    :COURSE,
+                    :UNIV_ID,
+                    :USERNAME,
+                    :MT_RAW,
+                    :MT_CURVE,
+                    :MT_GRADE,
+                    :GRADE=>:SEM_GRADE)
+    term = dfw_df[1,:TERM]
+    course = dfw_df[1,:COURSE]
+    fn = "$(course)_$(term)_DFW.csv"
+    CSV.write(fn,dfw_df;quotestrings=true)
+    dfw_df
+end
+        
