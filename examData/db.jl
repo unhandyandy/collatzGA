@@ -40,7 +40,14 @@ end
 
 checkCode(c,codes) = occursin(c,codes)
 
-version(row,cD,codes) = checkCode(ec(row),codes) ? (row[14+cD] % 4) + 1 : missing
+function version(row,cD,codes)
+    c = row[14+cD]
+    if ismissing(c) || c==""
+        missing
+    else
+        checkCode(ec(row),codes) ? (c % 4) + 1 : missing
+    end
+end
 
 row(i) = df[i,:]
 
@@ -59,6 +66,7 @@ function response(row,n)
 end
 
 function scoreone(row,v,n,anskeys)
+    @bp
     a = ismissing(v) ? missing : uppercase(answer(v,n,anskeys))
     r = response(row,n)
     ismissing(v) ? missing :
@@ -182,16 +190,28 @@ function extractData2(frm,term,exam,codeDigit,numberPrompts,codes,anskeys,nameDi
 end
 
 function compareVers(d)
+    nP = d[1,:numberPrompts]
+    numSamps,_ = size(d)
+    sig4 = p->8*sqrt(p*(1-p)/numSamps)
+    ## cols with scores for each prompt
+    colnums = collect(8:2:6+2*nP)
+    ## create vector of success rates for all prompts
+    ps = mapcols(c->mean(skipmissing(c)),select(d,colnums))
+    ps = ["total"; values(ps[1,:])...]
+    sigs = sig4.(ps[2:end])
+    sigs = ["4sig"; sigs]
     ## compare versions
     vergrps = groupby(d,:version)
-    len = size(d)[2]
-    cpVers = combine(vergrps, 8:2:len-1 .=> mean)
+    ## len = size(d)[2]
+    cpVers = combine(vergrps, colnums .=> mean)
     ## transpose dataframe:
     cpVers = DataFrame([[names(cpVers)]; collect.(eachrow(cpVers))], [:column; Symbol.(axes(cpVers, 1))])
+    cpVers.total = ps
+    cpVers[!,"4sig"] = sigs
     ## exam means
-    show(cpVers[2:end,2:5])
+    show(cpVers[2:end,[collect(2:5)...,7,8]])
     println()
-    combine(cpVers[2:end,:], 2:5 .=> mean)
+    combine(cpVers[2:end,:], [collect(2:5)...,7] .=> mean)
 end
 
 getAve(d) = skipmissing(d[!,end]) |> mean
@@ -803,16 +823,18 @@ end
 mutable struct MatMask
     n::Int8
     mat::Matrix{Bool}
+    len::Int8
 end
 
 function MatMask(n)
     empty = zeros(n,n).==1
-    MatMask(n,empty)
+    MatMask(n,empty,0)
 end
 
 function toggle(mm::MatMask,i,j)
     old = mm.mat[i,j]
     mm.mat[i,j] = mm.mat[j,i] = !old
+    mm.len += mm.mat[i,j]==1 ? 1 : -1
     mm
 end
 
@@ -1123,11 +1145,11 @@ function extractDFWframe(sem_grade_df,mt_df)
     iuids = getIUIDs()
     idd = makeIDDict(iuids)
     mtf = makeMTFinder(mt_df,idd)
-    sem_grade_df.USERNAME = (x->idd[x]["username"]).(grades.UNIV_ID)
-    sem_grade_df.MT_RAW = (x->mtf(x,:score)).(grades.UNIV_ID)
-    sem_grade_df.MT_CURVE = (x->mtf(x,:curve)).(grades.UNIV_ID)
-    sem_grade_df.MT_GRADE = (x->mtf(x,:grade)).(grades.UNIV_ID)
-    dfw_df = select(grades,
+    sem_grade_df.USERNAME = (x->idd[x]["username"]).(sem_grade_df.UNIV_ID)
+    sem_grade_df.MT_RAW = (x->mtf(x,:score)).(sem_grade_df.UNIV_ID)
+    sem_grade_df.MT_CURVE = (x->mtf(x,:curve)).(sem_grade_df.UNIV_ID)
+    sem_grade_df.MT_GRADE = (x->mtf(x,:grade)).(sem_grade_df.UNIV_ID)
+    dfw_df = select(sem_grade_df,
                     :TERM,
                     :COURSE,
                     :UNIV_ID,
@@ -1143,3 +1165,20 @@ function extractDFWframe(sem_grade_df,mt_df)
     dfw_df
 end
         
+function invertPermutation(vec)
+    len = length(vec)
+    res = zeros(Int8,len)
+    for i=1:len
+        res[vec[i]] = i
+    end
+    res
+end
+
+function invertVerMap(vm)
+    len = length(vm)
+    res = []
+    for i=1:len
+        push!(res,invertPermutation(values(vm[i])))
+    end
+    res
+end
